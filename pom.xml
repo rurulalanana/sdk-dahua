@@ -27,8 +27,10 @@
     <slf4j.version>1.7.36</slf4j.version>
     <jna.version>5.13.0</jna.version>
     <junit.version>5.10.2</junit.version>
-    <!-- 大华 NetSDK 的 Java 部分由 sdk/dahua 下的源码编译后 install 到本地仓库
-         （不在中央仓库，也不能随本仓库分发）。 -->
+    <!-- 大华 NetSDK 的 Java 部分（class 文件，4.7 MB）。
+         大华不提供公开 Maven 仓库，因此 jar 随本仓库携带在
+         lib/netsdk/netsdk-3.061.jar，由下方 install-netsdk-jar 自动装进本地仓库，
+         做到 clone 即可构建。 -->
     <netsdk.version>3.061</netsdk.version>
     <maven.compiler.plugin.version>3.11.0</maven.compiler.plugin.version>
     <!-- 不要升到 3.4.x：它依赖 plexus-archiver 的新版 API，
@@ -36,6 +38,7 @@
          "org.codehaus.plexus.archiver.FileSet" 的 NoClassDefFoundError。 -->
     <maven.jar.plugin.version>3.3.0</maven.jar.plugin.version>
     <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
+    <maven.install.plugin.version>3.1.4</maven.install.plugin.version>
 
     <!--
       当前激活平台的原生库目录名，由底部 profile 按操作系统覆盖。
@@ -48,9 +51,38 @@
     <netsdk.platform>linux64</netsdk.platform>
   </properties>
 
+  <!--
+    随仓库携带的本地 Maven 仓库，用于 com.netsdk:netsdk。
+
+    【为什么用 file:// 仓库而不是 install:install-file】
+    Maven 在**依赖解析阶段**就要找到 netsdk，而这发生在任何插件执行之前
+    （包括 initialize 阶段的 install-file）。实测把 install-file 绑到
+    initialize 仍然报「artifact has not been downloaded from it before」。
+    <repositories> 参与依赖解析本身，因此是唯一能做到「clone 即可构建」的方式。
+
+    目录结构是标准 Maven 布局：
+      lib/netsdk-repo/com/netsdk/netsdk/3.061/{netsdk-3.061.jar, .pom}
+
+    4.7 MB，只含 Java class，不含原生库。
+    版权归大华所有，仅限在已获授权的设备接入场景使用。
+  -->
+  <repositories>
+    <repository>
+      <id>sdk-dahua-bundled</id>
+      <name>sdk-dahua 随仓库携带的本地构件</name>
+      <url>file:///${project.basedir}/lib/netsdk-repo</url>
+      <releases>
+        <enabled>true</enabled>
+      </releases>
+      <snapshots>
+        <enabled>false</enabled>
+      </snapshots>
+    </repository>
+  </repositories>
+
   <dependencies>
-    <!-- provided：不打进产物、也不传递给上游，由部署方提供。
-         两个原因：厂商许可不允许随公开仓库分发；原生库要按目标 OS 选择。 -->
+    <!-- provided：不打进本模块产物、也不传递给上游。
+         使用方需要显式声明 compile 依赖（平台的交付形态是单 jar 部署）。 -->
     <dependency>
       <groupId>com.netsdk</groupId>
       <artifactId>netsdk</artifactId>

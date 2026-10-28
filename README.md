@@ -71,7 +71,10 @@ src/main/java/io/github/rurulalanana/
 
 ## 4. 原生库
 
-大华 SDK 的 `.so` / `.dll` **不入库**（厂商许可禁止随公开仓库分发）。
+大华 SDK 的 `.so` / `.dll` **随仓库携带**（`lib/linux64/`、`lib/win64/`，约 130 MB），
+做到 clone 即可构建。版权归浙江大华技术股份有限公司所有，仅限在已获授权的设备接入场景使用。
+
+官方 SDK 原始解压包 `sdk/`（约 700 MB）不入库，只有需要重新裁剪时才用：
 
 ```powershell
 # 1. 把官方 SDK 解压到 sdk/dahua/（不入库）
@@ -93,16 +96,25 @@ mvn install                                # 按当前操作系统自动选
 
 ## 5. 构建
 
-`com.netsdk:netsdk` 不在中央仓库，需要先 install 到本地：
+`com.netsdk:netsdk` 不在中央仓库，大华也不提供公开 Maven 仓库。
+本仓库把它放在 `lib/netsdk-repo/`（标准 Maven 目录布局，4.7 MB，只含 Java class），
+以 `file://` 仓库的形式提供。
 
 ```powershell
-# 未安装 netsdk 时，从上层工程跳过本模块：
-mvn install -pl gb28181-sip,gb28181-sip-zlm,gb28181-platform-starter
+# 全新 clone：第一次必须不带 -o
+mvn install
+
+# 之后可以离线
+mvn -o install
 ```
+
+⚠️ **`-o` 会拒绝 `file://` 仓库**（Maven 把本地文件仓库也视为远程）。
+所以新电脑第一次构建必须不带 `-o`；成功一次后 jar 会缓存进本地仓库，之后 `-o` 正常。
 
 `netsdk` 与 `jna` 在本模块是 **`provided`**，不会传递给使用方 ——
 因此没装 SDK 的机器也能正常编译与运行国标链路。
-需要大华功能时，由应用侧显式声明 `com.netsdk:netsdk` 的 compile 依赖。
+需要大华功能时，由应用侧显式声明 `com.netsdk:netsdk` 的 compile 依赖
+（`gb28181-platform-starter` 已这么做，并在自己的 pom 里声明了同一个 `file://` 仓库）。
 
 ---
 
