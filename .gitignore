@@ -10,6 +10,10 @@ sdk/
 *.dylib
 netsdk-api.jar
 
+# 按平台裁剪的原生库（构建时打进 jar，见 docs/原生库打包.md）
+# 上面的 *.so / *.dll 已兜住库文件，这里再显式排除整个 lib/ 下的其它残留。
+lib/
+
 # IDE
 .idea/
 *.iml
