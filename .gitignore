@@ -1,0 +1,29 @@
+# Maven
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# 大华 NetSDK：厂商版权，禁止入库
+# 从官方包解压后放到 sdk/ 下即可，构建时通过本地 Maven 依赖引用
+sdk/
+*.so
+*.dll
+*.dylib
+netsdk-api.jar
+
+# IDE
+.idea/
+*.iml
+*.ipr
+*.iws
+.vscode/
+.classpath
+.project
+.settings/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 日志
+logs/
+*.log

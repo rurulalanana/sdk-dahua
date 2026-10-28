@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.rurulalanana</groupId>
+  <artifactId>gb28181-dahua</artifactId>
+  <version>1.0.0</version>
+  <packaging>jar</packaging>
+
+  <name>gb28181-dahua</name>
+  <description>
+    大华 NetSDK 接入（GB/T 28181 之外的第二条设备接入通道）。
+  </description>
+  <url>https://github.com/rurulalanana/gb28181-dahua</url>
+
+  <properties>
+    <java.version>17</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <slf4j.version>1.7.36</slf4j.version>
+    <jna.version>5.13.0</jna.version>
+    <junit.version>5.10.2</junit.version>
+    <!-- 大华 NetSDK 的 Java 部分由 sdk/dahua 下的源码编译后 install 到本地仓库
+         （不在中央仓库，也不能随本仓库分发）。 -->
+    <netsdk.version>3.061</netsdk.version>
+    <maven.compiler.plugin.version>3.11.0</maven.compiler.plugin.version>
+    <maven.jar.plugin.version>3.3.0</maven.jar.plugin.version>
+    <maven.surefire.plugin.version>3.2.5</maven.surefire.plugin.version>
+  </properties>
+
+  <dependencies>
+    <!-- provided：不打进产物、也不传递给上游，由部署方提供。
+         两个原因：厂商许可不允许随公开仓库分发；原生库要按目标 OS 选择。 -->
+    <dependency>
+      <groupId>com.netsdk</groupId>
+      <artifactId>netsdk</artifactId>
+      <version>${netsdk.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>net.java.dev.jna</groupId>
+      <artifactId>jna</artifactId>
+      <version>${jna.version}</version>
+      <scope>provided</scope>
+    </dependency>
+
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>${junit.version}</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>${maven.compiler.plugin.version}</version>
+        <configuration>
+          <!-- 用 release 而不是 source/target：release 同时约束可用的 API 集合，
+               避免在 JDK 21 上编出只能跑 21 的字节码却以为目标是 17。 -->
+          <release>${java.version}</release>
+          <encoding>${project.build.sourceEncoding}</encoding>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>${maven.surefire.plugin.version}</version>
+      </plugin>
+    </plugins>
+  </build>
+
+</project>
