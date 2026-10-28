@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
 #
-# 准备 sdk-dahua 的构建前置条件并安装到本地 Maven 仓库。
+# 把随仓库携带的 netsdk 装进本地 Maven 仓库，并构建安装 sdk-dahua。
 #
-# 背景：大华 NetSDK 受厂商许可约束，不能随仓库分发，需要手工准备两样东西：
-#   1) com.netsdk:netsdk:3.061  —— 官方 SDK 的 Java 部分（class 文件）
-#   2) lib/<platform>/*.so|*.dll —— 按平台裁剪的原生库（打进 sdk-dahua 的 jar）
+# 背景（2026-10-28 方案调整）：
+#   原先 netsdk jar 与原生库都不入库，换机器要手工解压厂商 SDK。
+#   现在两者已随仓库携带：
+#     lib/netsdk-repo/  —— com.netsdk:netsdk:3.061 的 Java class（4.7 MB）
+#     lib/linux64/      —— 4 个 .so（84.8 MB）
+#     lib/win64/        —— 5 个 .dll（45.1 MB）
+#
+#   sdk-dahua 自己的 pom 配了 file:// 仓库指向 lib/netsdk-repo，
+#   能解决**自身**的依赖解析；但 <repositories> 不会传递给依赖方，
+#   starter 直接依赖 com.netsdk:netsdk，必须由本脚本 install 到 ~/.m2。
 #
 # 用法：
-#   ./scripts/prepare-netsdk.sh --sdk-jar <netsdk-api.jar> --platform linux64
-#   ./scripts/prepare-netsdk.sh --sdk-jar <netsdk-api.jar> --platform win64
-#   ./scripts/prepare-netsdk.sh --install-only   # 只把已在 ~/.m2 的 netsdk 装好并构建
+#   ./scripts/prepare-netsdk.sh                    # 自动选平台
+#   ./scripts/prepare-netsdk.sh --platform linux64 # 交叉打包
 #
-# 幂等：可重复执行。已 install 的 netsdk 会跳过。
+# 幂等：可重复执行。
 
 set -euo pipefail
 
@@ -20,16 +26,12 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$PROJECT_DIR"
 
 NETSDK_VERSION="3.061"
-SDK_JAR=""
 PLATFORM=""
-INSTALL_ONLY=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --sdk-jar)    SDK_JAR="$2"; shift 2 ;;
-    --platform)   PLATFORM="$2"; shift 2 ;;
-    --install-only) INSTALL_ONLY=1; shift ;;
-    -h|--help)    sed -n '2,20p' "$0"; exit 0 ;;
+    --platform) PLATFORM="$2"; shift 2 ;;
+    -h|--help)  sed -n '2,22p' "$0"; exit 0 ;;
     *) echo "未知参数: $1" >&2; exit 2 ;;
   esac
 done
@@ -38,7 +40,27 @@ info() { printf '\033[0;36m[信息]\033[0m %s\n' "$*"; }
 warn() { printf '\033[0;33m[警告]\033[0m %s\n' "$*"; }
 err()  { printf '\033[0;31m[错误]\033[0m %s\n' "$*" >&2; }
 
-# ---------------------------------------------------------------- 1. 平台推断
+# ---------------------------------------------------------------- 1. JDK 版本
+# netsdk jar 的 class 版本是 65（Java 21），低版本 JDK 读不了：
+#   类文件具有错误的版本 65.0, 应为 61.0
+detect_jdk21() {
+  if [[ -x /usr/libexec/java_home ]] && /usr/libexec/java_home -v 21 >/dev/null 2>&1; then
+    /usr/libexec/java_home -v 21
+  elif [[ -n "${JAVA_HOME:-}" ]] && "$JAVA_HOME/bin/java" -version 2>&1 | grep -q '"21'; then
+    echo "$JAVA_HOME"
+  fi
+}
+
+JDK21="$(detect_jdk21 || true)"
+if [[ -z "$JDK21" ]]; then
+  err "需要 JDK 21（netsdk jar 的 class 版本是 65，JDK 17 会报「类文件具有错误的版本 65.0」）"
+  err "macOS: /usr/libexec/java_home -v 21   |   Linux: 请安装 openjdk-21"
+  exit 1
+fi
+export JAVA_HOME="$JDK21"
+info "使用 JDK: $JAVA_HOME"
+
+# ---------------------------------------------------------------- 2. 平台
 detect_platform() {
   case "$(uname -s)" in
     Darwin) echo "darwin" ;;
@@ -50,63 +72,46 @@ detect_platform() {
 
 if [[ -z "$PLATFORM" ]]; then
   PLATFORM="$(detect_platform)"
-  if [[ -z "$PLATFORM" ]]; then
-    err "无法识别当前系统，请用 --platform 显式指定（linux64 / win64）"
-    exit 1
-  fi
   info "按当前系统推断平台: $PLATFORM"
 fi
 
 case "$PLATFORM" in
   linux64|win64) ;;
   darwin)
-    warn "官方 NetSDK 未提供 darwin 原生库，jar 里不会带 .so；"
+    warn "官方 NetSDK 没有 darwin 原生库，打出的 jar 不含 .so；"
     warn "本机可编译，但调用大华功能需在 Linux/Windows 上运行。"
     ;;
   *) err "未知平台: $PLATFORM（支持 linux64 / win64）"; exit 2 ;;
 esac
 
-# ---------------------------------------------------------------- 2. netsdk jar
-install_netsdk() {
-  local jar="$1"
-  [[ -f "$jar" ]] || { err "netsdk jar 不存在: $jar"; exit 1; }
+# ---------------------------------------------------------------- 3. netsdk → ~/.m2
+REPO_DIR="lib/netsdk-repo/com/netsdk/netsdk/$NETSDK_VERSION"
+JAR="$REPO_DIR/netsdk-$NETSDK_VERSION.jar"
+POM="$REPO_DIR/netsdk-$NETSDK_VERSION.pom"
 
-  info "安装 com.netsdk:netsdk:$NETSDK_VERSION <- $jar"
-  mvn -q install:install-file \
-    -Dfile="$jar" \
-    -DgroupId=com.netsdk \
-    -DartifactId=netsdk \
-    -Dversion="$NETSDK_VERSION" \
-    -Dpackaging=jar
-  info "netsdk 已进入本地仓库"
-}
+[[ -f "$JAR" ]] || { err "netsdk jar 缺失: $JAR"; exit 1; }
+[[ -f "$POM" ]] || { err "netsdk pom 缺失: $POM"; exit 1; }
 
-if [[ $INSTALL_ONLY -eq 0 ]]; then
-  if [[ -z "$SDK_JAR" ]]; then
-    err "缺少 --sdk-jar 参数（官方 SDK 的 Java 部分，如 netsdk-api.jar）"
-    err "或用 --install-only 只构建已装好的 netsdk"
-    exit 2
-  fi
-  install_netsdk "$SDK_JAR"
+TARGET="$HOME/.m2/repository/com/netsdk/netsdk/$NETSDK_VERSION/netsdk-$NETSDK_VERSION.jar"
+if [[ -f "$TARGET" ]] && cmp -s "$JAR" "$TARGET"; then
+  info "netsdk:$NETSDK_VERSION 已在本地仓库且内容一致，跳过安装"
 else
-  if [[ ! -f "$HOME/.m2/repository/com/netsdk/netsdk/$NETSDK_VERSION/netsdk-$NETSDK_VERSION.jar" ]]; then
-    err "本地仓库没有 netsdk:$NETSDK_VERSION，请先执行 --sdk-jar"
-    exit 1
-  fi
-  info "复用本地仓库已有的 netsdk:$NETSDK_VERSION"
+  info "安装 com.netsdk:netsdk:$NETSDK_VERSION 到本地仓库"
+  mvn -q install:install-file -Dfile="$JAR" -DpomFile="$POM"
 fi
 
-# ---------------------------------------------------------------- 3. 原生库
+# ---------------------------------------------------------------- 4. 原生库
 NATIVE_DIR="lib/$PLATFORM"
 if [[ -d "$NATIVE_DIR" ]] && [[ -n "$(ls -A "$NATIVE_DIR" 2>/dev/null)" ]]; then
-  info "原生库已就位: $NATIVE_DIR"
+  info "原生库就位: $NATIVE_DIR"
   ls -1 "$NATIVE_DIR" | sed 's/^/    /'
 else
   warn "$NATIVE_DIR 为空 —— 打包出的 jar 不含原生库"
-  warn "需要调用大华功能时，按 docs/原生库打包.md §1 从官方 SDK 裁剪后放入该目录"
+  warn "调用大华功能时会因找不到 libdhnetsdk 失败（dynamic-lib-load.xml 是白名单，"
+  warn "缺任一库整个提取会中断，后面的 dhnetsdk 根本不会被提取）"
 fi
 
-# ---------------------------------------------------------------- 4. 构建
+# ---------------------------------------------------------------- 5. 构建
 info "构建并安装 io.github.rurulalanana:sdk-dahua"
 mvn -q clean install -DskipTests "-Dnetsdk.platform=$PLATFORM"
 
